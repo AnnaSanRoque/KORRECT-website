@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import PlayerReportModal from './PlayerReportModal';
+import LevelsTab from './LevelsTab';
 
 const menuItems = [
   { id: 'overview', label: 'Dashboard', icon: '▦' },
   { id: 'users', label: 'Player Accounts', icon: '♙' },
   { id: 'analytics', label: 'Game Analytics', icon: '▥' },
   { id: 'leaderboard', label: 'Leaderboard', icon: '🏆' },
+  { id: 'levels', label: 'Levels & Lessons', icon: '✎' },
   { id: 'logs', label: 'Audit Logs', icon: '☷' },
 ];
 
@@ -22,17 +25,85 @@ export default function AdminDashboard() {
   const [playersError, setPlayersError] = useState('');
   const [actionPlayerId, setActionPlayerId] = useState(null);
   const [actionError, setActionError] = useState('');
+  const [riderFilter, setRiderFilter] = useState('');
+  const [riderRanks, setRiderRanks] = useState([]);
+  const [reportPlayer, setReportPlayer] = useState(null);
+  const [stats, setStats] = useState({
+    sessions: '—',
+    violations: '—',
+    finished: '—',
+    avgSafety: '—',
+    topViolations: [],
+  });
+  const [board, setBoard] = useState([]);
+  const [fastLevel, setFastLevel] = useState('Chp1Lvl1');
+  const [fastest, setFastest] = useState([]);
+  const [logs, setLogs] = useState([]);
+
+  async function fetchStats() {
+    const count = async (table, filter) => {
+      let query = supabase.from(table).select('*', { count: 'exact', head: true });
+      if (filter) query = filter(query);
+      const { count: total } = await query;
+      return total ?? 0;
+    };
+    const [sessions, violations, finished] = await Promise.all([
+      count('game_sessions'),
+      count('game_violations'),
+      count('level_attempts', (query) => query.eq('result', 'finished')),
+    ]);
+    const { data: safety } = await supabase
+      .from('level_attempts')
+      .select('safety_percent')
+      .neq('result', 'quit');
+    const avgSafety = safety?.length
+      ? String(Math.round(safety.reduce((sum, row) => sum + row.safety_percent, 0) / safety.length)) + '%'
+      : '—';
+    const { data: violationRows } = await supabase
+      .from('game_violations')
+      .select('violation_type')
+      .limit(10000);
+    const tally = {};
+    (violationRows || []).forEach((row) => {
+      tally[row.violation_type] = (tally[row.violation_type] || 0) + 1;
+    });
+    const topViolations = Object.entries(tally)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+    setStats({ sessions, violations, finished, avgSafety, topViolations });
+  }
+
+  async function fetchLeaderboard() {
+    const { data } = await supabase.rpc('leaderboard_total', { p_limit: 50 });
+    setBoard(data || []);
+  }
+
+  async function fetchFastest() {
+    const { data } = await supabase.rpc('leaderboard_fastest', {
+      p_level_name: fastLevel,
+      p_limit: 20,
+    });
+    setFastest(data || []);
+  }
+
+  async function fetchLogs() {
+    const { data } = await supabase
+      .from('admin_logs')
+      .select('created_at, action, details, admin:profiles!admin_logs_admin_id_fkey(username), target:profiles!admin_logs_target_user_id_fkey(username)')
+      .order('created_at', { ascending: false })
+      .limit(100);
+    setLogs(data || []);
+  }
 
   async function fetchPlayers() {
     setPlayersLoading(true);
     setPlayersError('');
 
     try {
-      // Calls the admin_list_players() function (see admin_player_monitoring.sql).
-      // It returns every player account the moment they register, plus
-      // last_sign_in_at from auth.users so we can tell "created but never
-      // logged in" apart from actual game activity.
-      const { data, error } = await supabase.rpc('admin_list_players');
+      const { data, error } = await supabase.rpc('admin_player_overview', {
+        p_search: null,
+        p_rider_status: riderFilter || null,
+      });
 
       if (error) throw error;
       setPlayers(data || []);
@@ -44,8 +115,26 @@ export default function AdminDashboard() {
   }
 
   useEffect(() => {
-    fetchPlayers();
+    supabase.from('rider_ranks').select('name').order('min_stars')
+      .then(({ data }) => setRiderRanks((data || []).map((r) => r.name)));
   }, []);
+
+  useEffect(() => {
+    fetchPlayers();
+  }, [riderFilter]);
+
+  useEffect(() => {
+    fetchStats();
+    fetchLeaderboard();
+  }, []);
+
+  useEffect(() => {
+    fetchFastest();
+  }, [fastLevel]);
+
+  useEffect(() => {
+    if (activeTab === 'logs') fetchLogs();
+  }, [activeTab]);
 
   async function handleBanToggle(player) {
     const isBanned = player.status === 'banned';
@@ -80,6 +169,32 @@ export default function AdminDashboard() {
   }
 
   async function handleDeletePlayer(player) {
+    const { data: hasRecords, error: checkError } =
+      await supabase.rpc('admin_player_has_records', { p_user_id: player.id });
+    if (checkError) {
+      setActionError(checkError.message);
+      return;
+    }
+
+    if (hasRecords) {
+      const archive = window.confirm(
+        `${player.username || player.email} has recorded game results, so the account cannot be deleted.\n\nArchive it instead? Their records will be kept for reports.`
+      );
+      if (!archive) return;
+      setActionError('');
+      setActionPlayerId(player.id);
+      const { error } = await supabase.rpc('admin_archive_player', { p_user_id: player.id });
+      setActionPlayerId(null);
+      if (error) {
+        setActionError(error.message);
+        return;
+      }
+      setPlayers((prev) => prev.map((p) => (
+        p.id === player.id ? { ...p, status: 'archived' } : p
+      )));
+      return;
+    }
+
     const confirmed = window.confirm(
       `Permanently delete ${player.username || player.email}? This cannot be undone.`
     );
@@ -241,14 +356,14 @@ export default function AdminDashboard() {
 
               <StatCard
                 title="GAME SESSIONS"
-                value="—"
+                value={stats.sessions}
                 icon="▶"
                 color="#4b83e5"
               />
 
               <StatCard
                 title="VIOLATIONS RECORDED"
-                value="—"
+                value={stats.violations}
                 icon="!"
                 color="#d94b4b"
               />
@@ -264,12 +379,14 @@ export default function AdminDashboard() {
                 <div style={styles.emptyChart}>
                   <span style={styles.chartIcon}>▥</span>
 
-                  <strong>No activity data yet</strong>
+                  <strong>Average safety rating: {stats.avgSafety}</strong>
 
                   <p style={styles.subtitle}>
-                    Connect player session data to display
-                    activity statistics here.
+                    Most common violations
                   </p>
+                  {(stats.topViolations || []).map(([name, count]) => (
+                    <p key={name} style={styles.subtitle}>{name}: {count}</p>
+                  ))}
                 </div>
               </section>
 
@@ -317,9 +434,17 @@ export default function AdminDashboard() {
               onChange={(event) =>
                 setSearch(event.target.value)
               }
-              placeholder="Search username or email..."
+              placeholder="Search username, email or user ID..."
               style={styles.searchInput}
             />
+            <select
+              value={riderFilter}
+              onChange={(event) => setRiderFilter(event.target.value)}
+              style={styles.searchInput}
+            >
+              <option value="">All rider statuses</option>
+              {riderRanks.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
 
             {playersLoading && (
               <p style={styles.subtitle}>Loading player accounts...</p>
@@ -347,6 +472,11 @@ export default function AdminDashboard() {
                       <th style={styles.th}>ACCOUNT STATUS</th>
                       <th style={styles.th}>LOGIN STATUS</th>
                       <th style={styles.th}>ACCOUNT CREATED</th>
+                      <th style={styles.th}>RIDER STATUS</th>
+                      <th style={styles.th}>STARS</th>
+                      <th style={styles.th}>SCORE</th>
+                      <th style={styles.th}>LEVELS</th>
+                      <th style={styles.th}>PLAYTIME</th>
                       <th style={styles.th}>ACTIONS</th>
                     </tr>
                   </thead>
@@ -358,7 +488,8 @@ export default function AdminDashboard() {
                         return (
                           !term ||
                           player.username?.toLowerCase().includes(term) ||
-                          player.email?.toLowerCase().includes(term)
+                          player.email?.toLowerCase().includes(term) ||
+                          player.id?.toLowerCase().includes(term)
                         );
                       })
                       .map((player) => (
@@ -375,7 +506,7 @@ export default function AdminDashboard() {
                                 ...styles.statusBadge,
                                 ...(player.status === 'banned'
                                   ? styles.bannedStatus
-                                  : player.status === 'suspended'
+                                  : player.status === 'suspended' || player.status === 'archived'
                                   ? styles.suspendedStatus
                                   : styles.activeStatus),
                               }}
@@ -404,6 +535,11 @@ export default function AdminDashboard() {
                               ? new Date(player.created_at).toLocaleString()
                               : '—'}
                           </td>
+                          <td style={styles.td}>{player.rider_status || 'Learner'}</td>
+                          <td style={styles.td}>{player.total_stars || 0} ★</td>
+                          <td style={styles.td}>{player.total_score || 0}</td>
+                          <td style={styles.td}>{player.levels_finished || 0}</td>
+                          <td style={styles.td}>{Math.round((player.total_playtime_seconds || 0) / 60)} min</td>
                           <td style={styles.td}>
                             <div style={{ display: 'flex', gap: '8px' }}>
                               <button
@@ -427,6 +563,14 @@ export default function AdminDashboard() {
                               >
                                 {actionPlayerId === player.id ? '...' : 'Delete'}
                               </button>
+                              <button
+                                type="button"
+                                disabled={actionPlayerId === player.id}
+                                onClick={() => setReportPlayer(player)}
+                                style={styles.actionButtonBan}
+                              >
+                                Report
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -437,11 +581,12 @@ export default function AdminDashboard() {
                       return (
                         !term ||
                         player.username?.toLowerCase().includes(term) ||
-                        player.email?.toLowerCase().includes(term)
+                        player.email?.toLowerCase().includes(term) ||
+                        player.id?.toLowerCase().includes(term)
                       );
                     }).length === 0 && (
                       <tr>
-                        <td colSpan="6" style={styles.emptyCell}>
+                        <td colSpan="11" style={styles.emptyCell}>
                           No matching players found.
                         </td>
                       </tr>
@@ -463,28 +608,28 @@ export default function AdminDashboard() {
             <div style={styles.statsGrid}>
               <StatCard
                 title="LOGINS (24 HOURS)"
-                value="—"
+                value={players.filter((player) => player.last_sign_in_at && Date.now() - new Date(player.last_sign_in_at) < 864e5).length}
                 icon="↗"
                 color="#4b83e5"
               />
 
               <StatCard
                 title="PLAY TIME"
-                value="—"
+                  value={String(Math.round(players.reduce((sum, player) => sum + (player.total_playtime_seconds || 0), 0) / 3600)) + ' h'}
                 icon="◷"
                 color="#16a085"
               />
 
               <StatCard
                 title="COMPLETED SESSIONS"
-                value="—"
+                value={stats.finished}
                 icon="✓"
                 color="#f58220"
               />
 
               <StatCard
                 title="VIOLATIONS"
-                value="—"
+                value={stats.violations}
                 icon="!"
                 color="#d94b4b"
               />
@@ -493,12 +638,14 @@ export default function AdminDashboard() {
             <div style={styles.emptyChart}>
               <span style={styles.chartIcon}>▥</span>
 
-              <strong>Analytics are not connected yet</strong>
+              <strong>Average safety rating: {stats.avgSafety}</strong>
 
               <p style={styles.subtitle}>
-                Session and violation records will be used
-                to populate this section.
+                Most common violations
               </p>
+              {(stats.topViolations || []).map(([name, count]) => (
+                <p key={name} style={styles.subtitle}>{name}: {count}</p>
+              ))}
             </div>
           </section>
         )}
@@ -516,22 +663,50 @@ export default function AdminDashboard() {
                   <tr>
                     <th style={styles.th}>RANK</th>
                     <th style={styles.th}>PLAYER</th>
-                    <th style={styles.th}>POINTS</th>
-                    <th style={styles.th}>PROGRESS</th>
+                    <th style={styles.th}>TOTAL SCORE</th>
+                    <th style={styles.th}>STARS / RIDER STATUS</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  <tr>
-                    <td colSpan="4" style={styles.emptyCell}>
-                      Leaderboard data is not connected yet.
-                    </td>
-                  </tr>
+                  {board.map((row) => (
+                    <tr key={row.username}>
+                      <td style={styles.td}>#{row.rank}</td>
+                      <td style={styles.td}>{row.username}</td>
+                      <td style={styles.td}>{row.total_score}</td>
+                      <td style={styles.td}>{row.total_stars} ★ · {row.rider_status}</td>
+                    </tr>
+                  ))}
+                  {board.length === 0 && (
+                    <tr><td colSpan="4" style={styles.emptyCell}>No leaderboard data yet.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <h3 style={styles.panelTitle}>Fastest clean runs</h3>
+            <select value={fastLevel} onChange={(event) => setFastLevel(event.target.value)} style={styles.searchInput}>
+              <option value="Chp1Lvl1">Chp1Lvl1</option>
+              <option value="Chp1Lvl2">Chp1Lvl2</option>
+            </select>
+            <div style={styles.tableWrap}>
+              <table style={styles.table}>
+                <thead><tr><th style={styles.th}>RANK</th><th style={styles.th}>PLAYER</th><th style={styles.th}>TIME</th><th style={styles.th}>DATE</th></tr></thead>
+                <tbody>
+                  {fastest.map((row) => (
+                    <tr key={row.username + '-' + row.rank}>
+                      <td style={styles.td}>#{row.rank}</td>
+                      <td style={styles.td}>{row.username}</td>
+                      <td style={styles.td}>{Math.floor(row.best_time_seconds / 60)}:{String(Math.round(row.best_time_seconds % 60)).padStart(2, '0')}</td>
+                      <td style={styles.td}>{new Date(row.achieved_at).toLocaleDateString()}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
           </section>
         )}
+
+        {activeTab === 'levels' && <LevelsTab styles={styles} />}
 
         {activeTab === 'logs' && (
           <section style={styles.panel}>
@@ -551,15 +726,33 @@ export default function AdminDashboard() {
                 </thead>
 
                 <tbody>
-                  <tr>
-                    <td colSpan="3" style={styles.emptyCell}>
-                      Audit log data is not connected yet.
-                    </td>
-                  </tr>
+                  {logs.map((log, index) => (
+                    <tr key={index}>
+                      <td style={styles.td}>{new Date(log.created_at).toLocaleString()}</td>
+                      <td style={styles.td}>{log.action}{log.admin?.username ? ' (by ' + log.admin.username + ')' : ''}</td>
+                      <td style={styles.td}>
+                        {log.target?.username ? log.target.username + ': ' : ''}
+                        {log.details?.from
+                          ? String(log.details.from) + ' → ' + String(log.details.to)
+                          : (log.details?.title || log.details?.level_name || '')}
+                      </td>
+                    </tr>
+                  ))}
+                  {logs.length === 0 && (
+                    <tr><td colSpan="3" style={styles.emptyCell}>No audit entries yet.</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
           </section>
+        )}
+
+        {reportPlayer && (
+          <PlayerReportModal
+            player={reportPlayer}
+            styles={styles}
+            onClose={() => setReportPlayer(null)}
+          />
         )}
 
         <footer style={styles.footer}>
