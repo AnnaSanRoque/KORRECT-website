@@ -14,6 +14,13 @@ import AdminDashboard from './admin/adminDashboard.jsx';
 
 import './App.css';
 
+// Where the APK file lives.
+// Default: put KORRECT.apk inside the project's "public" folder.
+// If you host it somewhere else (GitHub Releases, Supabase Storage,
+// Google Drive...), paste that full link here instead.
+const APK_URL = '/KORRECT-v1.0.3.apk';
+const APK_FILENAME = 'KORRECT-v1.0.3.apk';
+
 
 //ADMIN ROUTE (fixed dis na ragh)
 function AdminRoute({ session }) {
@@ -447,9 +454,13 @@ function Website({ session, onBlocked }) {
       return;
     }
 
-    alert(
-      'You are logged in! The KORRECT APK will be available once the game is released.'
-    );
+    // Start the APK download
+    const link = document.createElement('a');
+    link.href = APK_URL;
+    link.download = APK_FILENAME;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   }
 
   // WEBSITE CONTENT
@@ -602,8 +613,14 @@ function Website({ session, onBlocked }) {
           ) : (
             <>
               <p>
-                You are logged in. The official APK will become
-                available once the Unity game is ready for release.
+                You are logged in. The KORRECT APK is ready to
+                download.
+              </p>
+
+              <p>
+                After downloading, open the file on your Android
+                phone. If asked, allow installing apps from this
+                source.
               </p>
 
               <button
