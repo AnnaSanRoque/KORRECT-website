@@ -16,7 +16,62 @@ const menuItems = [
 // so there's nothing to hardcode or keep in sync.
 const DELETE_PLAYER_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-delete-player`;
 
+// True when the screen is phone / small-tablet sized.
+function useIsMobile(breakpoint = 820) {
+  const query = `(max-width: ${breakpoint}px)`;
+  const [isMobile, setIsMobile] = useState(
+    () => window.matchMedia(query).matches
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setIsMobile(media.matches);
+
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, [query]);
+
+  return isMobile;
+}
+
 export default function AdminDashboard() {
+  const isMobile = useIsMobile();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // On phones the sidebar becomes a slide-in menu, so these styles
+  // are layered on top of the normal (desktop) ones.
+  const styles = isMobile
+    ? mergeStyles(baseStyles, {
+        app: { flexDirection: 'column' },
+        sidebar: {
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: '270px',
+          minWidth: '270px',
+          minHeight: '0',
+          height: '100%',
+          zIndex: 60,
+          overflowY: 'auto',
+          transition: 'transform 0.25s ease',
+          transform: menuOpen ? 'translateX(0)' : 'translateX(-100%)',
+        },
+        main: { padding: '16px' },
+        header: { paddingBottom: '16px', marginBottom: '20px' },
+        pageTitle: { fontSize: '22px' },
+        contentGrid: { gridTemplateColumns: 'minmax(0, 1fr)' },
+        statsGrid: {
+          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+          gap: '12px',
+        },
+        statCard: { padding: '14px' },
+        statValue: { fontSize: '22px' },
+        panel: { padding: '16px' },
+      })
+    : baseStyles;
+
   const [activeTab, setActiveTab] = useState('overview');
   const [search, setSearch] = useState('');
   const [adminName, setAdminName] = useState('Administrator');
@@ -241,6 +296,31 @@ export default function AdminDashboard() {
 
   return (
     <div style={styles.app}>
+      {isMobile && (
+        <div style={mobileBarStyle}>
+          <button
+            type="button"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Open menu"
+            style={mobileMenuButtonStyle}
+          >
+            ☰
+          </button>
+          <strong style={{ letterSpacing: '1px' }}>KORRECT</strong>
+          <small style={{ color: '#9da3ae', letterSpacing: '0.7px' }}>
+            ADMIN PANEL
+          </small>
+        </div>
+      )}
+
+      {isMobile && menuOpen && (
+        <div
+          onClick={() => setMenuOpen(false)}
+          style={mobileOverlayStyle}
+          role="presentation"
+        />
+      )}
+
       <aside style={styles.sidebar}>
         <div style={styles.logo}>
           <div style={styles.logoIcon}>K</div>
@@ -259,7 +339,10 @@ export default function AdminDashboard() {
           {menuItems.map((item) => (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => {
+                setActiveTab(item.id);
+                setMenuOpen(false);
+              }}
               style={{
                 ...styles.menuButton,
                 ...(activeTab === item.id
@@ -824,7 +907,15 @@ function QuickAction({
   );
 }
 
-const styles = {
+function mergeStyles(base, overrides) {
+  const merged = { ...base };
+  Object.keys(overrides).forEach((key) => {
+    merged[key] = { ...base[key], ...overrides[key] };
+  });
+  return merged;
+}
+
+const baseStyles = {
   app: {
     display: 'flex',
     minHeight: '100vh',
@@ -1293,4 +1384,38 @@ const styles = {
     letterSpacing: '1px',
     textAlign: 'right',
   },
+};
+
+// Used by the small helper components (StatCard, PanelHeading, ...)
+const styles = baseStyles;
+
+const mobileBarStyle = {
+  position: 'sticky',
+  top: 0,
+  zIndex: 50,
+  display: 'flex',
+  alignItems: 'center',
+  gap: '12px',
+  padding: '12px 16px',
+  background: '#20242b',
+  color: '#fff',
+  boxSizing: 'border-box',
+  width: '100%',
+};
+
+const mobileMenuButtonStyle = {
+  border: 'none',
+  background: '#343943',
+  color: '#fff',
+  borderRadius: '8px',
+  padding: '8px 12px',
+  fontSize: '20px',
+  cursor: 'pointer',
+};
+
+const mobileOverlayStyle = {
+  position: 'fixed',
+  inset: 0,
+  background: 'rgba(0, 0, 0, 0.5)',
+  zIndex: 55,
 };
