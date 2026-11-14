@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from 'react';
 import {
   BrowserRouter,
@@ -156,15 +155,93 @@ function AdminRoute({ session }) {
 }
 
 // ------------------------------
+// BANNED / SUSPENDED POP-UP
+// ------------------------------
+function AccountBlockedModal({ status, onClose }) {
+  if (!status) return null;
+
+  const word = status === 'suspended' ? 'suspended' : 'banned';
+
+  return (
+    <div style={blockedStyles.overlay} role="presentation">
+      <div
+        style={blockedStyles.card}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="blocked-title"
+        aria-describedby="blocked-text"
+      >
+        <div style={blockedStyles.icon}>🚫</div>
+        <h2 id="blocked-title" style={blockedStyles.title}>
+          ACCOUNT {word.toUpperCase()}
+        </h2>
+        <p id="blocked-text" style={blockedStyles.text}>
+          Your account has been {word}. Contact support for more
+          information.
+        </p>
+        <button type="button" onClick={onClose} style={blockedStyles.button}>
+          OK
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const blockedStyles = {
+  overlay: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0, 0, 0, 0.65)',
+    display: 'grid',
+    placeItems: 'center',
+    zIndex: 9999,
+    padding: '20px',
+  },
+  card: {
+    background: '#ffffff',
+    color: '#20242b',
+    borderRadius: '14px',
+    padding: '32px 28px',
+    maxWidth: '400px',
+    width: '100%',
+    textAlign: 'center',
+    boxShadow: '0 20px 60px rgba(0, 0, 0, 0.4)',
+    borderTop: '6px solid #f58220',
+  },
+  icon: { fontSize: '40px', marginBottom: '8px' },
+  title: { margin: '0 0 12px', fontSize: '22px', letterSpacing: '1px' },
+  text: { margin: '0 0 24px', fontSize: '16px', lineHeight: 1.5 },
+  button: {
+    background: '#f58220',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '12px 36px',
+    fontSize: '15px',
+    fontWeight: 700,
+    cursor: 'pointer',
+  },
+};
+
+// ------------------------------
 // PLAYER WEBSITE
 // ------------------------------
-function Website({ session }) {
+function Website({ session, onBlocked }) {
   const [activeTab, setActiveTab] = useState('home');
   const [showRegister, setShowRegister] = useState(false);
 
   const [profileLoading, setProfileLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [profileMessage, setProfileMessage] = useState('');
+
+  // CHANGE PASSWORD state
+  const [passwordForm, setPasswordForm] = useState({
+    current: '',
+    next: '',
+    confirm: '',
+  });
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState('');
 
   const emptyProfile = {
     first_name: '',
@@ -276,6 +353,77 @@ function Website({ session }) {
     }
 
     setProfileMessage('Profile changes saved successfully!');
+  }
+
+  // CHANGE PASSWORD
+  function handlePasswordFieldChange(event) {
+    const { name, value } = event.target;
+    setPasswordForm((previous) => ({ ...previous, [name]: value }));
+  }
+
+  async function handleChangePassword() {
+    if (!session?.user) return;
+
+    setPasswordMessage('');
+
+    if (!passwordForm.current) {
+      setPasswordMessage('Please enter your current password.');
+      return;
+    }
+
+    if (passwordForm.next.length < 8) {
+      setPasswordMessage('New password must be at least 8 characters.');
+      return;
+    }
+
+    if (passwordForm.next !== passwordForm.confirm) {
+      setPasswordMessage('New password and confirmation do not match.');
+      return;
+    }
+
+    if (passwordForm.next === passwordForm.current) {
+      setPasswordMessage(
+        'New password must be different from your current password.'
+      );
+      return;
+    }
+
+    setPasswordSaving(true);
+
+    // Verify the current password first
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
+      email: session.user.email,
+      password: passwordForm.current,
+    });
+
+    if (verifyError) {
+      setPasswordSaving(false);
+      setPasswordMessage('Current password is incorrect.');
+      return;
+    }
+
+    const { error } = await supabase.auth.updateUser({
+      password: passwordForm.next,
+    });
+
+    setPasswordSaving(false);
+
+    if (error) {
+      setPasswordMessage(error.message);
+      return;
+    }
+
+    setPasswordForm({ current: '', next: '', confirm: '' });
+    setPasswordMessage('Password updated successfully!');
+  }
+
+  // Pressing Enter in a password box should change the password,
+  // not submit the profile form that surrounds it.
+  function handlePasswordKeyDown(event) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      handleChangePassword();
+    }
   }
 
   // LOGOUT
@@ -479,6 +627,7 @@ function Website({ session }) {
         ) : (
           <Login
             onSwitchToRegister={() => setShowRegister(true)}
+            onBlocked={onBlocked}
           />
         );
       }
@@ -621,10 +770,70 @@ function Website({ session }) {
                   </div>
                 </div>
 
-                <p>
-                  Password changes should be handled through a
-                  secure password reset or change-password flow.
-                </p>
+                <h3>Change Password</h3>
+
+                <div className="account-grid">
+                  <div className="form-group">
+                    <label htmlFor="current_password">
+                      Current Password
+                    </label>
+                    <input
+                      id="current_password"
+                      name="current"
+                      type="password"
+                      autoComplete="current-password"
+                      value={passwordForm.current}
+                      onChange={handlePasswordFieldChange}
+                      onKeyDown={handlePasswordKeyDown}
+                    />
+                  </div>
+
+                  <div className="form-group" />
+
+                  <div className="form-group">
+                    <label htmlFor="new_password">New Password</label>
+                    <input
+                      id="new_password"
+                      name="next"
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder="At least 8 characters"
+                      value={passwordForm.next}
+                      onChange={handlePasswordFieldChange}
+                      onKeyDown={handlePasswordKeyDown}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label htmlFor="confirm_password">
+                      Confirm New Password
+                    </label>
+                    <input
+                      id="confirm_password"
+                      name="confirm"
+                      type="password"
+                      autoComplete="new-password"
+                      value={passwordForm.confirm}
+                      onChange={handlePasswordFieldChange}
+                      onKeyDown={handlePasswordKeyDown}
+                    />
+                  </div>
+                </div>
+
+                {passwordMessage && (
+                  <p role="status">{passwordMessage}</p>
+                )}
+
+                <div className="account-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={handleChangePassword}
+                    disabled={passwordSaving}
+                  >
+                    {passwordSaving ? 'UPDATING...' : 'CHANGE PASSWORD'}
+                  </button>
+                </div>
               </div>
 
               <div className="account-section">
@@ -738,6 +947,9 @@ function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // 'banned' | 'suspended' | null  (controls the pop-up)
+  const [blockedStatus, setBlockedStatus] = useState(null);
+
   useEffect(() => {
     let mounted = true;
 
@@ -771,6 +983,40 @@ function App() {
     };
   }, []);
 
+  // Check the account status every time someone logs in (or the page
+  // loads with a saved login). Banned / suspended players are signed
+  // out and shown a pop-up.
+  const userId = session?.user?.id;
+
+  useEffect(() => {
+    if (!userId) return;
+
+    let cancelled = false;
+
+    async function enforceAccountStatus() {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('status')
+        .eq('id', userId)
+        .maybeSingle();
+
+      console.log('[KORRECT] account status check:', data?.status, error);
+
+      if (cancelled || error || !data) return;
+
+      if (data.status === 'banned' || data.status === 'suspended') {
+        setBlockedStatus(data.status);
+        await supabase.auth.signOut();
+      }
+    }
+
+    enforceAccountStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
   if (loading) {
     return (
       <div style={loadingStyle}>
@@ -780,6 +1026,12 @@ function App() {
   }
 
   return (
+    <>
+    <AccountBlockedModal
+      status={blockedStatus}
+      onClose={() => setBlockedStatus(null)}
+    />
+
     <BrowserRouter>
       <Routes>
         <Route
@@ -789,10 +1041,16 @@ function App() {
 
         <Route
           path="*"
-          element={<Website session={session} />}
+          element={
+            <Website
+              session={session}
+              onBlocked={setBlockedStatus}
+            />
+          }
         />
       </Routes>
     </BrowserRouter>
+    </>
   );
 }
 

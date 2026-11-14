@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
 
-function Login({ onSwitchToRegister, onLoginSuccess }) {
+function Login({ onSwitchToRegister, onLoginSuccess, onBlocked }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
@@ -41,15 +41,11 @@ function Login({ onSwitchToRegister, onLoginSuccess }) {
         return;
       }
 
-      if (profile.status === 'banned') {
-        setMessage('This account has been banned. Contact support if you think this is a mistake.');
+      if (profile.status === 'banned' || profile.status === 'suspended') {
         await supabase.auth.signOut();
-        return;
-      }
-
-      if (profile.status === 'suspended') {
-        setMessage('This account is suspended. Contact support for more information.');
-        await supabase.auth.signOut();
+        setPassword('');
+        // Show the pop-up (rendered by the parent page)
+        if (onBlocked) onBlocked(profile.status);
         return;
       }
 

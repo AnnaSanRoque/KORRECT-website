@@ -8,6 +8,11 @@ function Register({ onSwitchToLogin }) {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Step 2: email code verification
+  const [awaitingCode, setAwaitingCode] = useState(false);
+  const [code, setCode] = useState('');
+  const [pendingEmail, setPendingEmail] = useState('');
+
   async function handleRegister(e) {
     e.preventDefault();
     setMessage('');
@@ -41,15 +46,91 @@ function Register({ onSwitchToLogin }) {
       return;
     }
 
-    setMessage(
-      data.session
-        ? 'Account created successfully!'
-        : 'Account created! Check your email to confirm your account.'
-    );
+    if (data.session) {
+      // Email confirmation is off, so the user is already logged in.
+      setMessage('Account created successfully!');
+    } else {
+      // Confirmation is on: ask for the code that was emailed.
+      setPendingEmail(email.trim());
+      setAwaitingCode(true);
+      setMessage('We sent a code to your email. Enter it below.');
+    }
 
     setUsername('');
     setEmail('');
     setPassword('');
+  }
+
+  async function handleVerify(e) {
+    e.preventDefault();
+    setMessage('');
+    setLoading(true);
+
+    const { error } = await supabase.auth.verifyOtp({
+      email: pendingEmail,
+      token: code.trim(),
+      type: 'signup',
+    });
+
+    setLoading(false);
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    // On success Supabase logs the user in automatically,
+    // and App.jsx picks up the new session.
+    setMessage('Email confirmed! You are now logged in.');
+    setCode('');
+  }
+
+  async function handleResend() {
+    setMessage('');
+    setLoading(true);
+
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: pendingEmail,
+    });
+
+    setLoading(false);
+    setMessage(error ? error.message : 'A new code was sent to your email.');
+  }
+
+  if (awaitingCode) {
+    return (
+      <div className="auth-container">
+        <h1>KORRECT</h1>
+        <h2>Confirm Your Email</h2>
+
+        <form onSubmit={handleVerify}>
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            placeholder="Enter the code from your email"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            required
+          />
+
+          <button type="submit" disabled={loading}>
+            {loading ? 'Verifying...' : 'Verify'}
+          </button>
+        </form>
+
+        {message && <p>{message}</p>}
+
+        <button type="button" onClick={handleResend} disabled={loading}>
+          Resend code
+        </button>
+
+        <button type="button" onClick={onSwitchToLogin}>
+          Back to login
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -87,7 +168,7 @@ function Register({ onSwitchToLogin }) {
         </button>
       </form>
 
-      <p>{message}</p>
+      {message && <p>{message}</p>}
 
       <button type="button" onClick={onSwitchToLogin}>
         Already have an account? Login
