@@ -80,6 +80,7 @@ export default function AdminDashboard() {
   const [playersError, setPlayersError] = useState('');
   const [actionPlayerId, setActionPlayerId] = useState(null);
   const [actionError, setActionError] = useState('');
+  const [actionNotice, setActionNotice] = useState('');
   const [riderFilter, setRiderFilter] = useState('');
   const [riderRanks, setRiderRanks] = useState([]);
   const [reportPlayer, setReportPlayer] = useState(null);
@@ -233,7 +234,7 @@ export default function AdminDashboard() {
 
     if (hasRecords) {
       const archive = window.confirm(
-        `${player.username || player.email} has recorded game results, so the account cannot be deleted.\n\nArchive it instead? Their records will be kept for reports.`
+        `${player.username || player.email} already has recorded game results, so the account cannot be permanently deleted without losing those records.\n\nPress OK to ARCHIVE it instead. The player will no longer be able to log in, and their records stay available for reports.`
       );
       if (!archive) return;
       setActionError('');
@@ -247,9 +248,11 @@ export default function AdminDashboard() {
       setPlayers((prev) => prev.map((p) => (
         p.id === player.id ? { ...p, status: 'archived' } : p
       )));
+      setActionNotice(`${player.username || player.email} was archived.`);
       return;
     }
 
+    setActionNotice('');
     const confirmed = window.confirm(
       `Permanently delete ${player.username || player.email}? This cannot be undone.`
     );
@@ -279,8 +282,13 @@ export default function AdminDashboard() {
       if (!response.ok) throw new Error(result.error || 'Delete failed.');
 
       setPlayers((prev) => prev.filter((p) => p.id !== player.id));
+      setActionNotice(`${player.username || player.email} was deleted.`);
     } catch (error) {
-      setActionError(error.message || 'Unable to delete account.');
+      setActionError(
+        error instanceof TypeError
+          ? 'Could not reach the delete service (admin-delete-player). Make sure that Supabase Edge Function is deployed.'
+          : error.message || 'Unable to delete account.'
+      );
     } finally {
       setActionPlayerId(null);
     }
@@ -545,6 +553,12 @@ export default function AdminDashboard() {
               </p>
             )}
 
+            {actionNotice && (
+              <p style={{ ...styles.subtitle, color: '#1f8a4c' }}>
+                {actionNotice}
+              </p>
+            )}
+
             {!playersLoading && !playersError && (
               <div style={styles.tableWrap}>
                 <table style={styles.table}>
@@ -560,7 +574,7 @@ export default function AdminDashboard() {
                       <th style={styles.th}>SCORE</th>
                       <th style={styles.th}>LEVELS</th>
                       <th style={styles.th}>PLAYTIME</th>
-                      <th style={styles.th}>ACTIONS</th>
+                      <th style={{ ...styles.th, ...stickyActionsHead }}>ACTIONS</th>
                     </tr>
                   </thead>
 
@@ -623,7 +637,7 @@ export default function AdminDashboard() {
                           <td style={styles.td}>{player.total_score || 0}</td>
                           <td style={styles.td}>{player.levels_finished || 0}</td>
                           <td style={styles.td}>{Math.round((player.total_playtime_seconds || 0) / 60)} min</td>
-                          <td style={styles.td}>
+                          <td style={{ ...styles.td, ...stickyActionsCell }}>
                             <div style={{ display: 'flex', gap: '8px' }}>
                               <button
                                 type="button"
@@ -650,9 +664,9 @@ export default function AdminDashboard() {
                                 type="button"
                                 disabled={actionPlayerId === player.id}
                                 onClick={() => setReportPlayer(player)}
-                                style={styles.actionButtonBan}
+                                style={styles.actionButtonStats}
                               >
-                                Report
+                                View Stats
                               </button>
                             </div>
                           </td>
@@ -906,6 +920,24 @@ function QuickAction({
     </button>
   );
 }
+
+// Keeps the Ban / Delete / View Stats buttons on screen even when the table
+// is wider than the window (they used to be hidden off to the right).
+const stickyActionsHead = {
+  position: 'sticky',
+  right: 0,
+  background: '#f6f7f9',
+  boxShadow: '-8px 0 10px -8px rgba(0, 0, 0, 0.18)',
+  zIndex: 2,
+};
+
+const stickyActionsCell = {
+  position: 'sticky',
+  right: 0,
+  background: '#ffffff',
+  boxShadow: '-8px 0 10px -8px rgba(0, 0, 0, 0.18)',
+  zIndex: 1,
+};
 
 function mergeStyles(base, overrides) {
   const merged = { ...base };
@@ -1317,6 +1349,18 @@ const baseStyles = {
   bannedStatus: {
     background: '#2a2323',
     color: '#ff8a8a',
+  },
+
+  actionButtonStats: {
+    padding: '7px 12px',
+    border: 'none',
+    borderRadius: '8px',
+    background: '#f58220',
+    color: '#ffffff',
+    fontSize: '12px',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
   },
 
   actionButtonBan: {

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { accountExists } from '../lib/profile';
 
-function Login({ onSwitchToRegister, onLoginSuccess, onBlocked }) {
+function Login({ onSwitchToRegister, onNeedsVerify, onSuccess, onNotice, banner }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
@@ -14,21 +15,48 @@ function Login({ onSwitchToRegister, onLoginSuccess, onBlocked }) {
     setLoading(true);
 
     try {
-      const { data, error } =
-        await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
-        });
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
       if (error) {
+        const code = error.code || '';
+        const text = (error.message || '').toLowerCase();
+
+        // Email was never confirmed: send a fresh code and go to the code screen.
+        if (code === 'email_not_confirmed' || text.includes('not confirmed')) {
+          await supabase.auth.resend({ type: 'signup', email: email.trim() });
+          onNeedsVerify(email.trim(), 'Your email is not confirmed yet. We sent a new code to your inbox.');
+          return;
+        }
+
+        if (code === 'invalid_credentials' || text.includes('invalid login credentials')) {
+          const exists = await accountExists(email.trim());
+          setPassword('');
+
+          if (exists === false) {
+            onNotice({
+              tone: 'warning',
+              title: 'No account found',
+              text: 'We could not find an account with that email. It may not have been created yet, or it may have been deleted. You can create a new account.',
+            });
+          } else {
+            onNotice({
+              tone: 'warning',
+              title: 'Incorrect email or password',
+              text: 'Please check your credentials and try again. If you have not created an account yet, or it was deleted, you will need to register first.',
+            });
+          }
+          return;
+        }
+
         setMessage(error.message);
         return;
       }
 
-      // Check the player's account status before letting them in.
-      // A banned player can still authenticate (Supabase doesn't know
-      // about "banned"), so we check profiles.status ourselves and
-      // sign them right back out if it's not clear to play.
+      // A banned player can still authenticate (Supabase does not know about "banned"),
+      // so profiles.status is checked here and the player is signed straight back out.
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('status')
@@ -44,60 +72,62 @@ function Login({ onSwitchToRegister, onLoginSuccess, onBlocked }) {
       if (profile.status === 'banned' || profile.status === 'suspended') {
         await supabase.auth.signOut();
         setPassword('');
-        // Show the pop-up (rendered by the parent page)
-        if (onBlocked) onBlocked(profile.status);
+        onNotice({
+          tone: 'danger',
+          title: profile.status === 'suspended' ? 'Account suspended' : 'Account banned',
+          text: `Your account has been ${profile.status}. Contact support for more information.`,
+        });
         return;
       }
 
-      setMessage('Login successful!');
-
-      if (onLoginSuccess) {
-        onLoginSuccess(data.user);
+      if (profile.status === 'archived') {
+        await supabase.auth.signOut();
+        setPassword('');
+        onNotice({
+          tone: 'warning',
+          title: 'Account removed',
+          text: 'This account has been removed by an administrator and can no longer be used. You can create a new account.',
+        });
+        return;
       }
+
+      onSuccess(data.user);
     } catch (error) {
-      setMessage(
-        error.message || 'Something went wrong. Please try again.'
-      );
+      setMessage(error.message || 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="auth-container">
-      <h1>KORRECT</h1>
-      <h2>Player Login</h2>
+    <div className="auth-form">
+      <p className="eyebrow">Welcome back</p>
+      <h2>Log in</h2>
 
-      <form onSubmit={handleLogin}>
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
+      {banner && <div className="alert alert--ok" role="status">{banner}</div>}
 
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
+      <form onSubmit={handleLogin} noValidate={false}>
+        <label className="field">
+          <span>Email</span>
+          <input type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        </label>
 
-        <button type="submit" disabled={loading}>
-          {loading ? 'Logging in...' : 'Login'}
+        <label className="field">
+          <span>Password</span>
+          <input type="password" autoComplete="current-password" placeholder="Your password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        </label>
+
+        {message && <div className="alert alert--err" role="alert">{message}</div>}
+
+        <button type="submit" className="btn btn--block" disabled={loading}>
+          <span>{loading ? 'Logging in...' : 'Log in'}</span>
         </button>
       </form>
 
-      {message && <p>{message}</p>}
-
-      <button
-        type="button"
-        onClick={onSwitchToRegister}
-      >
-        Create an account
-      </button>
+      <p className="auth-switch">
+        New to KORRECT?{' '}
+        <button type="button" className="text-btn" onClick={onSwitchToRegister}>Create an account</button>
+      </p>
     </div>
   );
 }

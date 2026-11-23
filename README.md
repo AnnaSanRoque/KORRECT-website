@@ -1,16 +1,20 @@
-# React + Vite
+# KORRECT website
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + Vite + Supabase. Run `npm install` then `npm run dev`.
 
-Currently, two official plugins are available:
+## Where to edit things
+- News articles: `src/data/news.js` (add an object, give it a unique `slug`)
+- Quadtum logo: save the file as `public/quadtum-logo.png` (a text mark shows until it exists)
+- Team names: `src/pages/Quadtum.jsx`
+- Beginner's guide text: `src/pages/Guide.jsx`
+- Colors, fonts, layout: `src/App.css` (variables at the top)
+- APK file / name: `src/pages/Download.jsx`
+- Admin PDF report: `src/lib/pdfReport.js` (no extra packages needed)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Pages
+/ , /news , /news/:slug , /guide , /quadtum , /play (hidden login / sign-up) , /download , /account , /admin
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+## Database
+No Supabase tables, policies, functions or triggers were changed. The site only reads and writes
+the tables and functions it already used. The 14-day username cooldown is stored in the account's
+own metadata (`username_changed_at`), not in a new column.
