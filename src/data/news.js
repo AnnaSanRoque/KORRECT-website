@@ -91,6 +91,20 @@ export const NEWS = [
       { type: 'p', text: 'Different times of day, reduces visibility specially at night and heavier traffic all change what a safe ride looks like. Practice them here, in a controlled virtual environment, before you meet them for real.' },
     ],
   },
+  {
+    slug: 'new-version-1-0-4-released',
+    image: '/news/weatherver1.0.4.jpg',
+    category: 'Updates',
+    date: '2026-11-24',
+    readTime: '2 min read',
+    motif: 'download',
+    title: 'Newest Version 1.0.4 Released',
+    summary: 'The latest build of the KORRECT simulation can be downloaded from this website by any registered rider.',
+    body: [
+      { type: 'p', text: 'The newest version of KORRECT includes several improvements and bug fixes.' },
+      { type: 'p', text: 'Different levels, each with unique challenges and environments to test your riding skills.' },
+    ],
+  },
 ];
 
 export const formatDate = (iso) =>

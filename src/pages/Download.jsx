@@ -1,9 +1,9 @@
 import { Link } from 'react-router-dom';
 
 // Where the APK file lives (unchanged from the original site).
-// Default: KORRECT-v1.0.3.apk inside the project's "public" folder.
-const APK_URL = '/KORRECT-v1.0.3.apk';
-const APK_FILENAME = 'KORRECT-v1.0.3.apk';
+// Default: KORRECT-v1.0.4.apk inside the project's "public" folder.
+const APK_URL = '/KORRECT-v1.0.4.apk';
+const APK_FILENAME = 'KORRECT-v1.0.4.apk';
 
 export default function Download({ session }) {
   function handleDownload() {
